@@ -226,8 +226,6 @@ thread_create (const char *name, int priority,
 		// thread_yield()를 통해 CPU를 양보.
 		thread_yield();
 	}
-	
-
 	return tid;
 }
 
