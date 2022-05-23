@@ -24,13 +24,12 @@
    Do not modify this value. */
 #define THREAD_BASIC 0xd42df210
 
-// MIN 매크로
+// MIN 매크로 (Alarm Clock)
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 // #define MIN(a, b) (a < b ? a : b)
 
 // sleep_list에서 대기중인 스레드들의 wakeup_tick값 중 최소값을 저장 (Alarm Clock - next_tick_to_awake)
 static int64_t next_tick_to_awake;
-
 
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
@@ -220,7 +219,14 @@ thread_create (const char *name, int priority,
 	t->tf.eflags = FLAG_IF;
 
 	/* Add to run queue. */
+	// Thread의 unblock 후
 	thread_unblock (t);
+	// 현재 실행중인 thread와 우선순위를 비교하여, 새로 생성된 thread의 우선순위가 높다면
+	if (t->priority > thread_current()->priority) {
+		// thread_yield()를 통해 CPU를 양보.
+		thread_yield();
+	}
+	
 
 	return tid;
 }
@@ -255,7 +261,11 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+	// 맨뒤로 넣지않고 
+	// list_push_back (&ready_list, &t->elem);
+	// (Priority Scheduling - thread_unblock)
+	// 선형팀색으로 적절한 자리 찾아서 들어가기(우선순위 낮은애를 뒤로)
+	list_insert_ordered(&ready_list, &t-> elem, &cmp_priority, NULL); 
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -310,7 +320,7 @@ thread_exit (void) {
 /* Yields the CPU.  The current thread is not put to sleep and
    may be scheduled again immediately at the scheduler's whim. */
 
-// CPU를 양보하고, thread를 ready_list에 삽입
+// CPU를 양보하고, thread를 ready_list에 삽입(Alarm Clock)
 void
 thread_yield (void) {
 	// 현재 실행중인 쓰레드
@@ -322,8 +332,10 @@ thread_yield (void) {
 	old_level = intr_disable ();
 	// 현재 쓰레드가 일을 해야하는 쓰레드이면
 	if (curr != idle_thread)
-		// 레디리스트에 현재쓰레드 넣기
-		list_push_back (&ready_list, &curr->elem);
+		// 레디리스트에 현재쓰레드 넣기(Alarm Clock)
+		// list_push_back (&ready_list, &curr->elem);(Alarm Clock)
+		// 우선순위대로 정렬되어 삽입된다
+		list_insert_ordered(&ready_list, &curr->elem, &cmp_priority, NULL);
 	// 컨텍스트 스위치 작업을 수행
 	do_schedule (THREAD_READY);
 	// 인터럽트 받읋수 있는 상태로 만들기
@@ -334,6 +346,8 @@ thread_yield (void) {
 void
 thread_set_priority (int new_priority) {
 	thread_current ()->priority = new_priority;
+	// 실행 중인 스레드의 우선순위를 인자로 받은 새로운 우선순위 값으로 바꿔주는 함수.
+	test_max_priority();
 }
 
 /* Returns the current thread's priority. */
@@ -563,6 +577,7 @@ do_schedule(int status) {
 	schedule ();
 }
 
+// (Alarm Clock - sleep_list 초기화)
 static void
 schedule (void) {
 	// 바로전에 실행되던 쓰레드
@@ -583,7 +598,6 @@ schedule (void) {
 	// next를 실행상태로
 	next->status = THREAD_RUNNING;
 	/* Start new time slice. */
-	// 
 	thread_ticks = 0;
 
 #ifdef USERPROG
@@ -693,7 +707,6 @@ void thread_awake(int64_t ticks)
 	}
 }
 
-
 // 최소 틱을 가진 스레드 저장
 void update_next_tick_to_awake(int64_t ticks)
 {
@@ -705,10 +718,33 @@ void update_next_tick_to_awake(int64_t ticks)
 
 }
 
-
 // thread.c의 next_tick_to_awake 반환
 int64_t get_next_tick_to_awake(void)
 {
 	/* next_tick_to_awake 을 반환한다. */
 	return next_tick_to_awake;
 }
+
+
+// (Priority Scheduling - test_max_priority)
+// 현재 수행중인 스레드와 가장 높은 우선순위의 스레드의 우선순위를 비교하여 스케줄링
+void test_max_priority (void) {
+	if (list_empty(&ready_list))
+		return;
+	// 가장 높은 우선순위를 가진애가 맨앞으로 온다.
+	struct thread* high_priority = list_entry(list_front(&ready_list), struct thread, elem);
+	// 다음의 우선순위가 더 높으면 양보한다.
+	if (high_priority->priority > thread_current()->priority) {
+		thread_yield();
+	}
+}
+
+// (Priority Scheduling - cmp_priority)
+// 첫 번째 인자의 우선순위가 높으면 1을 반환, 두 번째 인자의 우선순위가 높으면 0을 반환
+bool cmp_priority (
+	const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+		struct thread* thread_a = list_entry(a, struct thread, elem);
+		struct thread* thread_b = list_entry(b, struct thread, elem);
+		// a가 크면 true
+		return (thread_a->priority > thread_b->priority);
+	}
