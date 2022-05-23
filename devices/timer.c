@@ -89,12 +89,21 @@ timer_elapsed (int64_t then) {
 
 /* Suspends execution for approximately TICKS timer ticks. */
 void
+// 특정 시간(start) tick만큼 지나기 전까지 CPU를 양보하고 쓰레드를 활성화시키지 않는다.
 timer_sleep (int64_t ticks) {
 	int64_t start = timer_ticks ();
-
+	// 인터럽트상태이면 실행 인터럽트상태아니면 중지
 	ASSERT (intr_get_level () == INTR_ON);
-	while (timer_elapsed (start) < ticks)
-		thread_yield ();
+
+  // (Alarm Clock - timer_sleep() 함수 수정)
+	// 기존의 busy waiting을 유발하는 코드를 삭제
+	// while (timer_elapsed (start) < ticks)
+	// 	// CPU를 양보하고, thread를 ready_list에 삽입
+	// 	thread_yield ();
+
+	// 새로 구현한 thread를 sleep queue에 삽입하는 함수를 호출
+	if (timer_elapsed (start) < ticks)
+		thread_sleep(start + ticks);
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -121,11 +130,21 @@ timer_print_stats (void) {
 	printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
 
+
 /* Timer interrupt handler. */
+// (Alarm Clock - timer_interrupt() 함수 수정)
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 	thread_tick ();
+	int64_t next_tick;
+	next_tick = get_next_tick_to_awake();
+	/* 매 tick마다 sleep queue에서 깨어날 thread가 있는지 확인하여, 
+			깨우는 함수를 호출하도록 한다. */
+	if (ticks >= next_tick)
+	{
+		thread_awake(ticks);
+	}
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
