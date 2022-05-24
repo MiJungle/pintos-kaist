@@ -1,3 +1,5 @@
+
+
 #ifndef THREADS_SYNCH_H
 #define THREADS_SYNCH_H
 
@@ -37,6 +39,10 @@ void cond_init (struct condition *);
 void cond_wait (struct condition *, struct lock *);
 void cond_signal (struct condition *, struct lock *);
 void cond_broadcast (struct condition *, struct lock *);
+
+// 구현할 함수 선언
+bool cmp_sem_priority (const struct list_elem *a, const struct list_elem *b, void *aux);
+
 
 /* Optimization barrier.
  *
