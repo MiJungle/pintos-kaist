@@ -91,9 +91,20 @@ struct thread {
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
-
+	// 깨어나야할 tick 저장 (Alarm Clock - wakeup_tick)
+	int64_t wakeup_tick;
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
+
+	// priority donation (Priority inversion)  
+	int init_priority; // priority가 바뀌니까 초기값 저장
+	// 해당 스레드가 우선순위 inversion 때문에 사용하지 못하고 기다리고 있는 lock 자료구조의 주소.
+	struct lock *wait_on_lock;
+	// 자신에게 priority를 donate한 스레드의 리스트
+	struct list donations;
+	// priority를 donate한 스레드들의 리스트를 관리하기 위한 element.
+	// 이 element를 통해 자신이 우선 순위를 donate한 스레드의 donations 리스트에 연결된다.
+	struct list_elem donation_elem;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -142,5 +153,35 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 void do_iret (struct intr_frame *tf);
+
+// 구현할 함수 선언(Alarm Clock - sleep_list 초기화)
+// 실행 중인 쓰레드를 슬립으로 만든다
+void thread_sleep(int64_t ticks);
+// 슬립큐에서 깨워야할 스레드를 깨움
+void thread_awake(int64_t ticks);
+// 최소 틱을 가진 스레드 저장
+void update_next_tick_to_awake(int64_t ticks);
+// thread.c의 next_tick_to_awake 반환
+int64_t get_next_tick_to_awake(void); // next_tick_to_awake 최소값 갱신?
+
+
+// 추가함수 (Priority Scheduling - test_max_priority)
+// 현재 수행중인 스레드와 가장 높은 우선순위의 스레드의 우선순위를 비교하여 스케줄링
+void test_max_priority (void);
+
+// (Priority Scheduling - cmp_priority)Z
+// /* 인자로 주어진 스레드들의 우선순위를 비교
+bool cmp_priority (
+	const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+
+// 구현할 함수 선언
+// (Priority inversion)
+void donate_priority(void);
+void remove_with_lock(struct lock *lock);
+void refresh_priority(void);
+
+bool thread_compare_donate_priority(
+	const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+
 
 #endif /* threads/thread.h */
