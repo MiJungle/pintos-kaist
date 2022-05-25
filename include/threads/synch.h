@@ -43,7 +43,6 @@ void cond_broadcast (struct condition *, struct lock *);
 // 구현할 함수 선언
 bool cmp_sem_priority (const struct list_elem *a, const struct list_elem *b, void *aux);
 
-
 /* Optimization barrier.
  *
  * The compiler will not reorder operations across an

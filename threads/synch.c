@@ -203,8 +203,20 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
 
-	sema_down (&lock->semaphore);
-	lock->holder = thread_current ();
+	struct thread* curr = thread_current();
+	/* 만약 해당 lock을 누가 사용하고 있다면 */
+	if (lock->holder){
+		curr->wait_on_lock = lock;  // 현재 스레드의 wait_on_lock에 해당 lock을 저장한다.
+		// 지금 lock을 소유하고 있는 스레드의 donations에 현재 스레드를 저장한다.
+		list_insert_ordered(&lock->holder->donations, &curr->donation_elem, 
+		thread_compare_donate_priority, 0);
+
+		donate_priority();
+	}
+
+	sema_down (&lock->semaphore); // lock을 얻기 위해 기다리는중
+	curr->wait_on_lock = NULL;  // lock을 획득했으므로 대기하고 있는 lock이 이제는 없다.
+	lock->holder = curr;
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -237,8 +249,11 @@ lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
-	lock->holder = NULL;
-	sema_up (&lock->semaphore);
+	remove_with_lock(lock); // donations 리스트에서 해당 lock을 필요로 하는 스레드를 없애준다.
+	refresh_priority();  // 현재 스레드의 priority를 업데이트한다.
+
+	lock->holder = NULL;  // lock의 holder를 NULL로.
+	sema_up (&lock->semaphore);  // sema를 UP 시켜 해당 lock에서 기다리고 있는 스레드 하나를 깨운다.
 }
 
 /* Returns true if the current thread holds LOCK, false
@@ -322,6 +337,9 @@ cond_wait (struct condition *cond, struct lock *lock) {
    interrupt handler. */
 
 
+// 여기서는 중간에 우선순위가 바뀌었을 수 있으니 
+// waiters list 내 우선순위를 점검하고(list_sort),
+// 그 다음 리스트 맨 앞에 있는 우선순위가 가장 높은 스레드에 대해 sema_up을 실행한다.
 void
 cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (cond != NULL);

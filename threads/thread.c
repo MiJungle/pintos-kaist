@@ -343,8 +343,9 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+	thread_current ()->init_priority = new_priority;
 	// 실행 중인 스레드의 우선순위를 인자로 받은 새로운 우선순위 값으로 바꿔주는 함수.
+	refresh_priority();   // donation이 제대로 이루어질 수 있도록!!
 	test_max_priority();
 }
 
@@ -443,8 +444,13 @@ init_thread (struct thread *t, const char *name, int priority) {
 	strlcpy (t->name, name, sizeof t->name);
 	// 모르겟음
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
-	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+
+	t->priority = priority;
+	// (Priority inversion)
+	t->init_priority = priority;
+	t->wait_on_lock = NULL;
+	list_init(&t->donations);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -748,3 +754,60 @@ bool cmp_priority (
 		// a가 크면 true
 		return (thread_a->priority > thread_b->priority);
 	}
+
+
+//
+void donate_priority(void) {
+	int depth;
+	struct thread* curr = thread_current();
+
+	/* 최대 depth는 8이다. */
+	for (depth = 0; depth < 8; depth++) {
+		if (!curr->wait_on_lock)   // 더 이상 nested가 없을 때.
+			break;
+		
+		struct thread* holder = curr->wait_on_lock->holder;
+		holder->priority = curr->priority;   // 우선 순위를 donation한다.
+		curr = holder;  //  그 다음 depth로 들어간다.
+	}
+}
+
+
+//
+void remove_with_lock(struct lock* lock){
+	struct list_elem* e;
+	struct thread* curr = thread_current();
+
+	for (e = list_begin(&curr->donations); e != list_end(&curr->donations); e = list_next(e)){
+		struct thread* t = list_entry(e, struct thread, donation_elem);
+		if (t->wait_on_lock == lock){
+			list_remove(&t->donation_elem);
+		}
+	}
+}
+
+
+void refresh_priority(void){
+	struct thread* curr = thread_current();
+
+	curr->priority = curr->init_priority;  // 우선 원복해준다.
+
+	/* donation을 받고 있다면 */
+	if (!list_empty(&curr->donations)){
+			list_sort(&curr->donations, thread_compare_donate_priority, 0);
+	
+			struct thread* front = list_entry(list_front(&curr->donations), struct thread, donation_elem);
+			
+			if(front->priority > curr->priority)  // 만약 초기 우선 순위보다 더 큰 값이라면
+				curr->priority = front->priority;
+	}
+}
+
+// 우선순위 순으로 들어감
+bool thread_compare_donate_priority(
+	const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+	struct thread* thread_a = list_entry(a, struct thread, donation_elem);
+	struct thread* thread_b = list_entry(b, struct thread, donation_elem);
+
+	return (thread_a->priority > thread_b->priority);
+}
