@@ -45,10 +45,10 @@ process_create_initd (const char *file_name) {
 
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
-	fn_copy = palloc_get_page (0);
+	fn_copy = palloc_get_page (0);	// 하나의 가용 페이지를 할당하고 그 커널 가상 주소를 리턴.
 	if (fn_copy == NULL)
 		return TID_ERROR;
-	strlcpy (fn_copy, file_name, PGSIZE);
+	strlcpy (fn_copy, file_name, PGSIZE);		// fn_copy 주소 공간에 file_name을 복사해 넣어주고, 4kb로 길이 한정한다(임의로 준 크기)
 
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
@@ -174,16 +174,44 @@ process_exec (void *f_name) {
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
 	/* We first kill the current context */
-	process_cleanup ();
+	process_cleanup ();  // 현재 프로세스가 사용하고 있던 pml4를 모두 반환한다.
+
+	// file_name 문자열을 파싱
+	char *argv[128];  // 인자들 넣을 준비
+	int argc = 0;
+	
+	char *token, *save_ptr;
+	for (token = strtok_r(file_name, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr)) {
+			argv[argc] = token;
+			argc++;
+	}
+	// argv = {"args-single", "onearg", NULL}가 된다.
 
 	/* And then load the binary */
-	success = load (file_name, &_if);
+	success = load (file_name, &_if);		// 새로운 프로세스를 메모리에 적재한다.
+	
 
 	/* If load failed, quit. */
-	palloc_free_page (file_name);
-	if (!success)
+	
+	if (!success) {
+		palloc_free_page (file_name);
 		return -1;
+	}
 
+	/* command line에서 받은 인자들을 스택에 차곡차곡 쌓는다. */
+	argument_stack(argv, argc, &_if);
+	_if.R.rdi = argc;			// 첫 번째 인자 argc를 RDI에.
+	_if.R.rsi = _if.rsp + 8;	
+	
+	// 두 번째 인자 argv를 RSI에. 
+	// 그냥 argv를 넣으면 여기 커널 스택에서의 char *argv[128]의 주소가 나온다.
+	// 따라서 유저 스택에 쌓은 argv의 주소를 가져와야 하므로 _if.rsp+8이다.
+	hex_dump(_if.rsp, _if.rsp, USER_STACK - _if.rsp, true);  // 메모리에 어떻게 쌓이는지 확인용
+	/* 작업이 끝났으므로 동적할당한 file_name이 담긴 메모리 free */
+	palloc_free_page (file_name);
+
+	/* 지금까지 바꿔준 인터럽트 프레임의 값으로 레지스터 값을 바꿔준다. 
+	   즉, 새 프로세스로 switching한다.*/
 	/* Start switched process. */
 	do_iret (&_if);
 	NOT_REACHED ();
@@ -204,6 +232,7 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	while(1) {};  // infinite loop 추가
 	return -1;
 }
 
@@ -336,6 +365,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	process_activate (thread_current ());
 
 	/* Open executable file. */
+	// 현재 함수와 이름 모두 들어옴 => 이름만 들어오도록 수정해야함, filesys_open => 파일을 여는 함수
 	file = filesys_open (file_name);
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", file_name);
@@ -569,6 +599,56 @@ install_page (void *upage, void *kpage, bool writable) {
 	return (pml4_get_page (t->pml4, upage) == NULL
 			&& pml4_set_page (t->pml4, upage, kpage, writable));
 }
+
+void argument_stack(char **argv, int argc, struct intr_frame *if_) { 
+	// if_는 인터럽트 스택 프레임 => 여기에다가 쌓는다.
+	
+	/* insert arguments' address */
+	char *arg_address[128];
+
+	// 거꾸로 삽입 => 스택은 반대 방향으로 확장하기 떄문!
+	
+	/* 맨 끝 NULL 값(arg[4]) 제외하고 스택에 저장(arg[0] ~ arg[3]) */
+	for (int i = argc-1; i>=0; i--) { 
+		int argv_len = strlen(argv[i]);
+		/* 
+		if_->rsp: 현재 user stack에서 현재 위치를 가리키는 스택 포인터.
+		각 인자에서 인자 크기(argv_len)를 읽고 (이때 각 인자에 sentinel이 포함되어 있으니 +1 - strlen에서는 sentinel 빼고 읽음)
+		그 크기만큼 rsp를 내려준다. 그 다음 빈 공간만큼 memcpy를 해준다.
+		 */
+		if_->rsp = if_->rsp - (argv_len + 1);
+		memcpy(if_->rsp, argv[i], argv_len+1);
+		arg_address[i] = if_->rsp; // arg_address 배열에 현재 문자열 시작 주소 위치를 저장한다.
+	}
+
+	/* word-align: 8의 배수 맞추기 위해 padding 삽입*/
+	while (if_->rsp % 8 != 0) 
+	{
+		if_->rsp--; // 주소값을 1 내리고
+		*(uint8_t *) if_->rsp = 0; //데이터에 0 삽입 => 8바이트 저장
+	}
+
+	/* 이제는 주소값 자체를 삽입! 이때 센티넬 포함해서 넣기*/
+	
+	for (int i = argc; i >=0; i--) 
+	{ // 여기서는 NULL 값 포인터도 같이 넣는다.
+		if_->rsp = if_->rsp - 8; // 8바이트만큼 내리고
+		if (i == argc) { // 가장 위에는 NULL이 아닌 0을 넣어야지
+			memset(if_->rsp, 0, sizeof(char **));
+		} else { // 나머지에는 arg_address 안에 들어있는 값 가져오기
+			memcpy(if_->rsp, &arg_address[i], sizeof(char **)); // char 포인터 크기: 8바이트
+		}	
+	}
+	
+
+	/* fake return address */
+	if_->rsp = if_->rsp - 8; // void 포인터도 8바이트 크기
+	memset(if_->rsp, 0, sizeof(void *));
+
+	if_->R.rdi  = argc;
+	if_->R.rsi = if_->rsp + 8; // fake_address 바로 위: arg_address 맨 앞 가리키는 주소값!
+}
+
 #else
 /* From here, codes will be used after project 3.
  * If you want to implement the function for only project 2, implement it on the
