@@ -123,6 +123,7 @@ main (void) {
 
 	/* Run actions specified on kernel command line. */
 	run_actions (argv);		// argv를 기준으로 run_actions() 실행
+	// argv = ["run", "'echo x'", NULL]
 
 	/* Finish up. */
 	if (power_off_when_done)
@@ -261,6 +262,7 @@ run_task (char **argv) {
 
 // NULL을 만날 때까지 argv를 하나하나씩 실행(["run"->"'echo x'"->NULL])	 
 static void
+// argv = ["run", "'echo x'", NULL]
 run_actions (char **argv) {
 	/* An action. */
 	struct action {
