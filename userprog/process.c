@@ -45,6 +45,7 @@ process_create_initd (const char *file_name) {
 
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
+	// page 가상메모리의 단위
 	fn_copy = palloc_get_page (0);	// 하나의 가용 페이지를 할당하고 그 커널 가상 주소를 리턴.
 	if (fn_copy == NULL)
 		return TID_ERROR;
@@ -164,7 +165,6 @@ int
 process_exec (void *f_name) {
 	char *file_name = f_name;
 	bool success;
-
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
 	 * it stores the execution information to the member. */
@@ -179,15 +179,19 @@ process_exec (void *f_name) {
 	// file_name 문자열을 파싱
 	char *argv[128];  // 인자들 넣을 준비
 	int argc = 0;
-	
+
+
+	// pintos --fs-disk=10 -p tests/userprog/args-single:args-single -- -q -f run 'args-single onearg'
+	// printf("file_name: %s\n", file_name);		// file_name: args-single onearg
 	char *token, *save_ptr;
 	for (token = strtok_r(file_name, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr)) {
 			argv[argc] = token;
+			// printf("token: %s\n", token);  // => token: args-single, token: onearg 두번출력
 			argc++;
 	}
-	// argv = {"args-single", "onearg", NULL}가 된다.
 
 	/* And then load the binary */
+	// printf("load_file_name: %s\n", file_name);  // => load_file_name: args-single
 	success = load (file_name, &_if);		// 새로운 프로세스를 메모리에 적재한다.
 	
 
@@ -212,6 +216,7 @@ process_exec (void *f_name) {
 
 	/* 지금까지 바꿔준 인터럽트 프레임의 값으로 레지스터 값을 바꿔준다. 
 	   즉, 새 프로세스로 switching한다.*/
+		 
 	/* Start switched process. */
 	do_iret (&_if);
 	NOT_REACHED ();
@@ -232,7 +237,9 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	while(1) {};  // infinite loop 추가
+	for (int i = 0; i < 100000000; i ++) {} // infinite loop 추가
+	// while (1) {}
+	
 	return -1;
 }
 
@@ -619,11 +626,15 @@ void argument_stack(char **argv, int argc, struct intr_frame *if_) {
 		if_->rsp = if_->rsp - (argv_len + 1);
 		memcpy(if_->rsp, argv[i], argv_len+1);
 		arg_address[i] = if_->rsp; // arg_address 배열에 현재 문자열 시작 주소 위치를 저장한다.
+		// printf("argv : %s\n", argv[i]); 	// => argv : onearg  => argv : args-single
+		// printf("argc : %d\n", argv_len + 1);		// => 7 12 
 	}
 
 	/* word-align: 8의 배수 맞추기 위해 padding 삽입*/
+	int k = 0;
 	while (if_->rsp % 8 != 0) 
 	{
+		// printf("%d\n", k++);		// 5번 출력
 		if_->rsp--; // 주소값을 1 내리고
 		*(uint8_t *) if_->rsp = 0; //데이터에 0 삽입 => 8바이트 저장
 	}
@@ -637,6 +648,8 @@ void argument_stack(char **argv, int argc, struct intr_frame *if_) {
 			memset(if_->rsp, 0, sizeof(char **));
 		} else { // 나머지에는 arg_address 안에 들어있는 값 가져오기
 			memcpy(if_->rsp, &arg_address[i], sizeof(char **)); // char 포인터 크기: 8바이트
+			// printf("&arg_address[i] : %s\n", &arg_address[i]);
+			// printf("sizeof(char **) : %d\n", sizeof(char **));		// = > 8
 		}	
 	}
 	
@@ -645,7 +658,7 @@ void argument_stack(char **argv, int argc, struct intr_frame *if_) {
 	if_->rsp = if_->rsp - 8; // void 포인터도 8바이트 크기
 	memset(if_->rsp, 0, sizeof(void *));
 
-	if_->R.rdi  = argc;
+	if_->R.rdi = argc;
 	if_->R.rsi = if_->rsp + 8; // fake_address 바로 위: arg_address 맨 앞 가리키는 주소값!
 }
 
