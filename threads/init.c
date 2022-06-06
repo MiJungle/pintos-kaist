@@ -74,8 +74,15 @@ main (void) {
 	bss_init ();
 
 	/* Break command line into arguments and parse options. */
-	argv = read_command_line ();
-	argv = parse_options (argv);
+	// pintos --fs-disk=10 -p tests/userprog/args-single:args-single -- -q -f run 'args-single onearg'
+	argv = read_command_line ();	// 커맨드 라인을 읽어와 argv에 저장 (pintos –q run 'echo x')
+	// printf("file_name: %s\n", argv);
+	argv = parse_options (argv);	// argv = ["pintos", "-q", "run", "'echo x'", NULL]	
+	// printf("file_name: %s\n", argv);
+	// argv를 parsing하고 추가적인 option들을 세팅한다.
+  // "run"등의 action부터 argv에 다시 넣는다.
+	// argv = ["run", "'echo x'", NULL]
+
 
 	/* Initialize ourselves as a thread so we can use locks,
 	   then enable console locking. */
@@ -89,7 +96,7 @@ main (void) {
 
 #ifdef USERPROG
 	tss_init ();
-	gdt_init ();
+	gdt_init (); // Global Descriptor Table
 #endif
 
 	/* Initialize interrupt handlers. */
@@ -119,7 +126,8 @@ main (void) {
 	printf ("Boot complete.\n");
 
 	/* Run actions specified on kernel command line. */
-	run_actions (argv);
+	run_actions (argv);		// argv를 기준으로 run_actions() 실행
+	// argv = ["run", "'echo x'", NULL]
 
 	/* Finish up. */
 	if (power_off_when_done)
@@ -237,14 +245,15 @@ parse_options (char **argv) {
 /* Runs the task specified in ARGV[1]. */
 static void
 run_task (char **argv) {
-	const char *task = argv[1];
+		// argv = ["run", "'echo x'", NULL]
+	const char *task = argv[1];  // task = "echo x"
 
 	printf ("Executing '%s':\n", task);
 #ifdef USERPROG
 	if (thread_tests){
 		run_test (task);
-	} else {
-		process_wait (process_create_initd (task));
+	} else {  // thread1이 아니면 
+		process_wait (process_create_initd (task));  // 해당 함수 실행
 	}
 #else
 	run_test (task);
@@ -254,7 +263,9 @@ run_task (char **argv) {
 
 /* Executes all of the actions specified in ARGV[]
    up to the null pointer sentinel. */
+// NULL을 만날 때까지 argv를 하나하나씩 실행(["run"->"'echo x'"->NULL])	 
 static void
+// argv = ["run", "'echo x'", NULL]
 run_actions (char **argv) {
 	/* An action. */
 	struct action {
@@ -264,6 +275,7 @@ run_actions (char **argv) {
 	};
 
 	/* Table of supported actions. */
+	// "run" 과 동일한 argv가 들어와야 run_task() 함수 실행
 	static const struct action actions[] = {
 		{"run", 2, run_task},
 #ifdef FILESYS
@@ -276,25 +288,28 @@ run_actions (char **argv) {
 		{NULL, 0, NULL},
 	};
 
+	// NULL을 만날 때까지 argv를 하나하나씩 실행(["run"->"'echo x'"->NULL])
 	while (*argv != NULL) {
 		const struct action *a;
 		int i;
 
+		// 명령어 잘못입력
 		/* Find action name. */
 		for (a = actions; ; a++)
 			if (a->name == NULL)
 				PANIC ("unknown action `%s' (use -h for help)", *argv);
-			else if (!strcmp (*argv, a->name))
+			else if (!strcmp (*argv, a->name))		// *argv와 a->name이 같다면
 				break;
 
+		// 인자안넣었을때
 		/* Check for required arguments. */
 		for (i = 1; i < a->argc; i++)
 			if (argv[i] == NULL)
 				PANIC ("action `%s' requires %d argument(s)", *argv, a->argc - 1);
 
 		/* Invoke action and advance. */
-		a->function (argv);
-		argv += a->argc;
+		a->function (argv);		// run_task(["run", "'echo x'", NULL])
+		argv += a->argc;			// a->argc = 2
 	}
 
 }

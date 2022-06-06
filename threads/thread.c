@@ -249,7 +249,7 @@ void thread_print_stats(void)
 	 우선 순위 예약은 문제 1-3의 목표입니다.
 	 */
 
-// 	tid_t tid = thread_create(name, curr->priority, __do_fork, curr);
+// thread_create(name, parent->priority, __do_fork, parent);
 tid_t thread_create(const char *name, int priority, thread_func *function, void *aux)
 {
 	struct thread *t;
