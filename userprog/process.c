@@ -89,7 +89,7 @@ process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 	/* Clone current thread to new thread.*/
 	/* ------------- project 2 ------------------ */
 	struct thread *parent = thread_current();
-	// 메모리
+	// 메모리 
 	memcpy(&parent->parent_if, if_, sizeof(struct intr_frame));
 	// printf("parent_tid : %d\n", parent->tid);
 	// printf("current_tid1 : %d\n", thread_current()->tid); // 3
